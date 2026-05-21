@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { addToast } from '../ToastContainer'
+import { ImageUpload } from './ProductManager'
 
 const EMPTY = { title: '', subtitle: '', button_text: 'Shop Now', bg_color: '#1e40af', image_url: '', link_url: '', sort_order: 0, is_active: true }
 
@@ -122,11 +123,16 @@ export default function BannerManager() {
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-full"><i className="fas fa-times" /></button>
             </div>
             <form onSubmit={save} className="p-5 space-y-3">
-              <Inp label="Title *" value={form.title} onChange={setF('title')} />
-              <Inp label="Subtitle" value={form.subtitle} onChange={setF('subtitle')} />
-              <Inp label="Button Text" value={form.button_text} onChange={setF('button_text')} />
-              <Inp label="Image URL" value={form.image_url} onChange={setF('image_url')} placeholder="https://..." />
-              <Inp label="Link URL" value={form.link_url} onChange={setF('link_url')} placeholder="https://..." />
+              <Inp label="Title *"      value={form.title}       onChange={setF('title')} />
+              <Inp label="Subtitle"     value={form.subtitle}    onChange={setF('subtitle')} />
+              <Inp label="Button Text"  value={form.button_text} onChange={setF('button_text')} />
+              <Inp label="Link URL"     value={form.link_url}    onChange={setF('link_url')} placeholder="https://..." />
+              <ImageUpload
+                bucket="products"
+                label="Banner Image"
+                value={form.image_url}
+                onChange={url => setForm(f => ({ ...f, image_url: url }))}
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-semibold text-gray-600">Background Color</label>

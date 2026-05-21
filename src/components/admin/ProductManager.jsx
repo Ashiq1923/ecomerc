@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase, formatPrice } from '../../lib/supabase'
 import { addToast } from '../ToastContainer'
 
 const EMPTY = { name: '', description: '', price: '', sale_price: '', stock: '', category_id: '', image_url: '', is_active: true }
+const BUCKET = 'products'
 
 export default function ProductManager() {
   const [products,   setProducts]   = useState([])
@@ -27,7 +28,7 @@ export default function ProductManager() {
     setLoading(false)
   }
 
-  function openNew() { setEditing(null); setForm(EMPTY); setShowForm(true) }
+  function openNew()  { setEditing(null); setForm(EMPTY); setShowForm(true) }
   function openEdit(p) {
     setEditing(p)
     setForm({ name: p.name, description: p.description || '', price: p.price, sale_price: p.sale_price || '', stock: p.stock, category_id: p.category_id || '', image_url: p.image_url || '', is_active: p.is_active })
@@ -39,13 +40,14 @@ export default function ProductManager() {
     if (!form.name || !form.price) { addToast('Name and price are required', 'error'); return }
     setSaving(true)
     const payload = {
-      name: form.name, description: form.description,
-      price: parseFloat(form.price),
-      sale_price: form.sale_price ? parseFloat(form.sale_price) : null,
-      stock: parseInt(form.stock) || 0,
+      name:        form.name,
+      description: form.description,
+      price:       parseFloat(form.price),
+      sale_price:  form.sale_price ? parseFloat(form.sale_price) : null,
+      stock:       parseInt(form.stock) || 0,
       category_id: form.category_id || null,
-      image_url: form.image_url || null,
-      is_active: form.is_active,
+      image_url:   form.image_url || null,
+      is_active:   form.is_active,
     }
     try {
       if (editing) {
@@ -122,7 +124,7 @@ export default function ProductManager() {
                     <span className={`font-semibold ${p.stock <= 5 ? 'text-red-500' : 'text-gray-700'}`}>{p.stock}</span>
                   </td>
                   <td className="px-3 py-2 text-amber-500 font-semibold">
-                    {p.avg_rating ? `⭐ ${Number(p.avg_rating).toFixed(1)}` : '—'}
+                    {p.avg_rating ? `${Number(p.avg_rating).toFixed(1)}` : '—'}
                   </td>
                   <td className="px-3 py-2">
                     <button onClick={() => toggleActive(p)}
@@ -163,13 +165,14 @@ export default function ProductManager() {
               <Inp label="Product Name *" name="name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">Description</label>
-                <textarea id="prod-description" name="description" rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                <textarea id="prod-description" name="description" rows={3} value={form.description}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                   className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <Inp label="Price (Rs.) *" name="price" type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
-                <Inp label="Sale Price (Rs.)" name="sale_price" type="number" value={form.sale_price} onChange={e => setForm(f => ({ ...f, sale_price: e.target.value }))} />
-                <Inp label="Stock" name="stock" type="number" value={form.stock} onChange={e => setForm(f => ({ ...f, stock: e.target.value }))} />
+                <Inp label="Price (Rs.) *" name="price"      type="number" value={form.price}      onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
+                <Inp label="Sale Price"    name="sale_price"  type="number" value={form.sale_price}  onChange={e => setForm(f => ({ ...f, sale_price: e.target.value }))} />
+                <Inp label="Stock"         name="stock"       type="number" value={form.stock}       onChange={e => setForm(f => ({ ...f, stock: e.target.value }))} />
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-semibold text-gray-600">Category</label>
                   <select value={form.category_id} onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))}
@@ -179,10 +182,14 @@ export default function ProductManager() {
                   </select>
                 </div>
               </div>
-              <Inp label="Image URL" name="image_url" value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="https://..." />
-              {form.image_url && (
-                <img src={form.image_url} alt="Preview" className="w-24 h-24 rounded-xl object-cover border" onError={e => e.target.style.display = 'none'} />
-              )}
+
+              {/* Image upload */}
+              <ImageUpload
+                bucket={BUCKET}
+                value={form.image_url}
+                onChange={url => setForm(f => ({ ...f, image_url: url }))}
+              />
+
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} className="w-4 h-4 accent-primary" />
                 <span className="text-sm text-gray-700">Active (visible to customers)</span>
@@ -205,11 +212,121 @@ export default function ProductManager() {
   )
 }
 
+/* ── Image Upload Component ─────────────────────────────────────── */
+export function ImageUpload({ bucket, value, onChange, label = 'Product Image' }) {
+  const [uploading, setUploading] = useState(false)
+  const [error,     setError]     = useState(null)
+  const inputRef = useRef()
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate type and size (max 5MB)
+    if (!file.type.startsWith('image/')) {
+      setError('Sirf image files allowed hain (jpg, png, webp)')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image 5MB se choti honi chahiye')
+      return
+    }
+
+    setError(null)
+    setUploading(true)
+
+    try {
+      const ext      = file.name.split('.').pop()
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+
+      const { data, error: uploadErr } = await supabase.storage
+        .from(bucket)
+        .upload(fileName, file, { cacheControl: '3600', upsert: false })
+
+      if (uploadErr) throw uploadErr
+
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(data.path)
+
+      onChange(publicUrl)
+    } catch (err) {
+      setError(err.message || 'Upload fail hua, dobara try karo')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-semibold text-gray-600">{label}</label>
+
+      {/* Preview + upload area */}
+      <div className="flex gap-3 items-start">
+
+        {/* Preview box */}
+        <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-200 flex-shrink-0 overflow-hidden bg-gray-50 flex items-center justify-center">
+          {value ? (
+            <img src={value} alt="Preview" className="w-full h-full object-cover" onError={e => e.target.style.display='none'} />
+          ) : (
+            <i className="fas fa-image text-2xl text-gray-300" />
+          )}
+        </div>
+
+        {/* Controls */}
+        <div className="flex-1 space-y-2">
+          {/* Upload button */}
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-xl text-sm font-semibold transition disabled:opacity-50 w-full justify-center"
+          >
+            {uploading
+              ? <><i className="fas fa-spinner fa-spin" /> Uploading...</>
+              : <><i className="fas fa-upload" /> Device se Upload karo</>
+            }
+          </button>
+          <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+
+          {/* Manual URL input */}
+          <input
+            type="text"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            placeholder="ya URL paste karo..."
+            className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition text-gray-600"
+          />
+        </div>
+      </div>
+
+      {/* Remove button */}
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="text-xs text-red-400 hover:text-red-600 transition self-start flex items-center gap-1"
+        >
+          <i className="fas fa-times" /> Image hatao
+        </button>
+      )}
+
+      {/* Error */}
+      {error && (
+        <p className="text-xs text-red-500 flex items-center gap-1">
+          <i className="fas fa-exclamation-circle" /> {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function Inp({ label, name, type = 'text', value, onChange, placeholder }) {
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs font-semibold text-gray-600">{label}</label>
-      <input name={name} type={type} value={value} onChange={onChange} placeholder={placeholder}
+      <input id={`prod-${name}`} name={name} type={type} value={value} onChange={onChange} placeholder={placeholder}
         className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition" />
     </div>
   )
