@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 
 export default function BarcodeScanner({ onScan, onClose }) {
-  const videoRef    = useRef(null)
-  const streamRef   = useRef(null)   // raw MediaStream
-  const controlsRef = useRef(null)   // ZXing controls
+  const videoRef   = useRef(null)
+  const streamRef  = useRef(null)
+  const rafRef     = useRef(null)   // requestAnimationFrame id
+  const readerRef  = useRef(new BrowserMultiFormatReader())
+  const canvasRef  = useRef(document.createElement('canvas'))
+
   const [error,   setError]   = useState(null)
   const [devices, setDevices] = useState([])
-  const [selDev,  setSelDev]  = useState(undefined) // undefined = enumerating
+  const [selDev,  setSelDev]  = useState(undefined)
   const [scanned, setScanned] = useState(null)
 
-  // Step 1 — enumerate cameras once on mount
   useEffect(() => {
     navigator.mediaDevices?.enumerateDevices()
       .then(all => {
@@ -25,7 +27,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
     return () => cleanup()
   }, [])
 
-  // Step 2 — start camera whenever selected device changes
   useEffect(() => {
     if (selDev === undefined) return
     startCamera(selDev)
@@ -36,7 +37,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
     cleanup()
     setError(null)
     try {
-      // 1. Get stream with getUserMedia — most reliable way
       const stream = await navigator.mediaDevices.getUserMedia({
         video: deviceId
           ? { deviceId: { exact: deviceId } }
@@ -44,34 +44,54 @@ export default function BarcodeScanner({ onScan, onClose }) {
       })
       streamRef.current = stream
 
-      // 2. Attach stream to video element and play explicitly
       const video = videoRef.current
       if (!video) { cleanup(); return }
       video.srcObject = stream
       await video.play()
 
-      // 3. Hand the already-playing stream to ZXing for barcode decoding
-      const reader   = new BrowserMultiFormatReader()
-      const controls = await reader.decodeFromStream(stream, video, (result) => {
-        if (!result) return
-        const text = result.getText()
-        if (/^ORD-[A-Z0-9]{6}$/i.test(text)) {
-          setScanned(text.toUpperCase())
-          cleanup()
-          onScan(text.toUpperCase())
-        }
-      })
-      controlsRef.current = controls
+      // Start frame-by-frame decoding loop once video is actually playing
+      video.addEventListener('playing', startScanLoop, { once: true })
     } catch (e) {
       setError(e.message || 'Could not access camera')
     }
   }
 
-  function cleanup() {
-    if (controlsRef.current) {
-      try { controlsRef.current.stop() } catch {}
-      controlsRef.current = null
+  function startScanLoop() {
+    const video  = videoRef.current
+    const canvas = canvasRef.current
+    const ctx    = canvas.getContext('2d')
+    const reader = readerRef.current
+
+    async function tick() {
+      if (!video || video.readyState < 2 || video.paused) {
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+      canvas.width  = video.videoWidth
+      canvas.height = video.videoHeight
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      try {
+        const result = reader.decodeFromCanvas(canvas)
+        if (result) {
+          const text = result.getText()
+          if (/^ORD-[A-Z0-9]{6}$/i.test(text)) {
+            setScanned(text.toUpperCase())
+            cleanup()
+            onScan(text.toUpperCase())
+            return // stop loop
+          }
+        }
+      } catch {
+        // NotFoundException fires on every empty frame — ignore
+      }
+      rafRef.current = requestAnimationFrame(tick)
     }
+
+    rafRef.current = requestAnimationFrame(tick)
+  }
+
+  function cleanup() {
+    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop())
       streamRef.current = null
@@ -89,7 +109,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm modal-enter overflow-hidden">
 
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 bg-gray-900 text-white">
           <span className="text-sm font-semibold flex items-center gap-2">
             <i className="fas fa-barcode text-emerald-400" /> Scan Order Barcode
@@ -99,7 +118,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
           </button>
         </div>
 
-        {/* Camera selector — only if multiple cameras */}
         {devices.length > 1 && (
           <div className="px-4 pt-3">
             <select
@@ -114,7 +132,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
           </div>
         )}
 
-        {/* Video feed */}
         <div className="relative mx-4 my-3 rounded-xl overflow-hidden bg-black" style={{ aspectRatio: '16/9' }}>
           <video
             ref={videoRef}
@@ -124,7 +141,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
             playsInline
           />
 
-          {/* Scanning guide */}
           {!scanned && !error && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="border-2 border-emerald-400 rounded-lg w-3/4 h-16 relative">
@@ -138,7 +154,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
             </div>
           )}
 
-          {/* Success overlay */}
           {scanned && (
             <div className="absolute inset-0 bg-emerald-500/90 flex flex-col items-center justify-center gap-2">
               <i className="fas fa-check-circle text-white text-4xl" />
@@ -147,7 +162,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
             </div>
           )}
 
-          {/* Error overlay */}
           {error && (
             <div className="absolute inset-0 bg-gray-900/90 flex flex-col items-center justify-center gap-2 p-4 text-center">
               <i className="fas fa-video-slash text-red-400 text-3xl" />
@@ -157,7 +171,6 @@ export default function BarcodeScanner({ onScan, onClose }) {
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-4 pb-4 text-center">
           {!scanned && !error && (
             <p className="text-xs text-gray-400 flex items-center justify-center gap-1.5">
@@ -166,10 +179,7 @@ export default function BarcodeScanner({ onScan, onClose }) {
             </p>
           )}
           {scanned && (
-            <button
-              onClick={rescan}
-              className="mt-1 w-full py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition"
-            >
+            <button onClick={rescan} className="mt-1 w-full py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition">
               <i className="fas fa-redo mr-1" /> Dobara Scan Karo
             </button>
           )}
