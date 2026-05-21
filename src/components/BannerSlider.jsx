@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 const FALLBACK = [
@@ -32,6 +32,8 @@ export default function BannerSlider() {
   const [banners, setBanners] = useState([])
   const [current, setCurrent] = useState(0)
   const [loading, setLoading] = useState(true)
+  const trackRef  = useRef(null)
+  const snapping  = useRef(false)
 
   useEffect(() => {
     supabase
@@ -43,35 +45,62 @@ export default function BannerSlider() {
         setBanners(data?.length ? data : FALLBACK)
         setLoading(false)
       })
-      .catch(() => {
-        setBanners(FALLBACK)
-        setLoading(false)
-      })
+      .catch(() => { setBanners(FALLBACK); setLoading(false) })
   }, [])
 
-  const next = useCallback(() => setCurrent(c => (c + 1) % banners.length), [banners.length])
-  const prev = useCallback(() => setCurrent(c => (c - 1 + banners.length) % banners.length), [banners.length])
+  // Extended list: real slides + clone of first → seamless forward loop
+  const ext = banners.length ? [...banners, banners[0]] : []
 
+  const next = useCallback(() => {
+    if (snapping.current) return
+    setCurrent(c => c + 1)
+  }, [])
+
+  const prev = useCallback(() => {
+    if (snapping.current) return
+    setCurrent(c => (c - 1 + banners.length) % banners.length)
+  }, [banners.length])
+
+  // Auto-play
   useEffect(() => {
     if (!banners.length) return
     const t = setInterval(next, 5000)
     return () => clearInterval(t)
   }, [next, banners.length])
 
-  if (loading) {
-    return <div className="skeleton h-56 sm:h-72 lg:h-[420px] w-full" />
+  // When transition ends at the clone (index = banners.length), snap back to real first (index 0)
+  function onTransitionEnd() {
+    if (current === banners.length) {
+      snapping.current = true
+      const track = trackRef.current
+      if (track) track.style.transition = 'none'
+      setCurrent(0)
+      // Two rAF frames to let React re-render before re-enabling transition
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (track) track.style.transition = ''
+        snapping.current = false
+      }))
+    }
   }
 
+  if (loading) return <div className="skeleton h-64 sm:h-80 lg:h-[460px] w-full" />
+
+  const activeDot = current % banners.length
+
   return (
-    <div className="relative overflow-hidden select-none">
-      <div className="banner-track" style={{ transform: `translateX(-${current * 100}%)` }}>
-        {banners.map(b => (
+    <div className="relative overflow-hidden select-none group">
+      <div
+        ref={trackRef}
+        className="banner-track"
+        style={{ transform: `translateX(-${current * 100}%)` }}
+        onTransitionEnd={onTransitionEnd}
+      >
+        {ext.map((b, i) => (
           <div
-            key={b.id}
-            className="banner-slide relative h-56 sm:h-72 lg:h-[420px]"
+            key={`${b.id}-${i}`}
+            className="banner-slide relative h-64 sm:h-80 lg:h-[460px]"
             style={{ background: b.bg_color || '#111827' }}
           >
-            {/* Background image */}
             {b.image_url && (
               <img
                 src={b.image_url}
@@ -80,11 +109,7 @@ export default function BannerSlider() {
                 onError={e => { e.target.style.display = 'none' }}
               />
             )}
-
-            {/* Dark gradient overlay */}
             <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/40 to-transparent" />
-
-            {/* Content */}
             <div className="relative z-10 h-full flex flex-col justify-center px-8 sm:px-16 lg:px-24">
               <div className="max-w-lg">
                 <h2 className="text-2xl sm:text-4xl lg:text-5xl font-extrabold text-white drop-shadow-lg mb-3 leading-tight tracking-tight">
@@ -108,34 +133,34 @@ export default function BannerSlider() {
         ))}
       </div>
 
-      {/* Navigation arrows */}
       {banners.length > 1 && (
         <>
+          {/* Arrows — hidden by default, visible on banner hover */}
           <button
             onClick={prev}
-            className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 flex items-center justify-center hover:bg-white/25 transition-all duration-200 z-20 text-white"
-            aria-label="Previous slide"
+            className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 flex items-center justify-center hover:bg-white/30 z-20 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+            aria-label="Previous"
           >
             <i className="fas fa-chevron-left text-sm" />
           </button>
           <button
             onClick={next}
-            className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 flex items-center justify-center hover:bg-white/25 transition-all duration-200 z-20 text-white"
-            aria-label="Next slide"
+            className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/15 backdrop-blur-sm border border-white/20 flex items-center justify-center hover:bg-white/30 z-20 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+            aria-label="Next"
           >
             <i className="fas fa-chevron-right text-sm" />
           </button>
 
-          {/* Dot indicators */}
+          {/* Dots — show real slides count only (not the clone) */}
           <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex gap-2 z-20">
             {banners.map((_, i) => (
               <button
                 key={i}
                 onClick={() => setCurrent(i)}
                 className={`h-1.5 rounded-full transition-all duration-300 ${
-                  i === current ? 'w-8 bg-emerald-400' : 'w-2 bg-white/40 hover:bg-white/60'
+                  i === activeDot ? 'w-8 bg-emerald-400' : 'w-2 bg-white/40 hover:bg-white/60'
                 }`}
-                aria-label={`Go to slide ${i + 1}`}
+                aria-label={`Slide ${i + 1}`}
               />
             ))}
           </div>

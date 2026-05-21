@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import BannerSlider from '../components/BannerSlider'
@@ -25,6 +25,8 @@ export default function HomePage() {
   const [query,      setQuery]      = useState(searchParams.get('q') || '')
   const [page,       setPage]       = useState(1)
   const [hasMore,    setHasMore]    = useState(true)
+  const [sortOpen,   setSortOpen]   = useState(false)
+  const sortRef = useRef(null)
 
   // Load categories once
   useEffect(() => {
@@ -151,15 +153,41 @@ export default function HomePage() {
             )}
           </p>
 
-          <select
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value)}
-            className="text-sm border border-gray-200 rounded-xl px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-400 bg-white text-gray-700 transition-all duration-150 shadow-sm"
-          >
-            {SORT_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          <div ref={sortRef} className="relative">
+            <button
+              onClick={() => setSortOpen(o => !o)}
+              className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 rounded-xl bg-white text-sm text-gray-700 shadow-sm hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-200 transition-all"
+            >
+              <i className="fas fa-sort-amount-down text-gray-400 text-xs" />
+              {SORT_OPTIONS.find(o => o.value === sortBy)?.label}
+              <i className={`fas fa-chevron-down text-xs text-gray-400 transition-transform duration-200 ${sortOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {sortOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setSortOpen(false)} />
+                <div className="absolute right-0 top-full mt-2 bg-white border border-gray-100 rounded-2xl shadow-xl z-20 py-1.5 min-w-[200px] overflow-hidden">
+                  {SORT_OPTIONS.map(o => (
+                    <button
+                      key={o.value}
+                      onClick={() => { setSortBy(o.value); setSortOpen(false) }}
+                      className={`w-full text-left flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors ${
+                        sortBy === o.value
+                          ? 'bg-emerald-50 text-emerald-700 font-semibold'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {sortBy === o.value
+                        ? <i className="fas fa-check text-emerald-500 text-xs w-3" />
+                        : <span className="w-3" />
+                      }
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Product grid */}
