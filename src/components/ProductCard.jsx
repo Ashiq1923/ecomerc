@@ -47,12 +47,20 @@ export default function ProductCard({ product }) {
           loading="lazy"
         />
 
-        {/* Sale badge */}
-        {pct > 0 && (
-          <span className="absolute top-2.5 left-2.5 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full leading-none">
-            -{pct}%
-          </span>
-        )}
+        {/* Badges: discount + sold stacked */}
+        <div className="absolute top-2.5 left-2.5 flex flex-col gap-1">
+          {pct > 0 && (
+            <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full leading-none">
+              -{pct}%
+            </span>
+          )}
+          {product.total_orders > 0 && (
+            <span className="bg-emerald-500 text-white text-xs font-bold px-2 py-1 rounded-full leading-none flex items-center gap-1">
+              <i className="fas fa-fire text-xs" />
+              {product.total_orders} sold
+            </span>
+          )}
+        </div>
 
         {/* Out of stock overlay */}
         {!inStock && (
@@ -79,21 +87,13 @@ export default function ProductCard({ product }) {
           {product.name}
         </h3>
 
-        {/* Star rating + order count */}
-        <div className="flex items-center justify-between mt-0.5">
-          {product.avg_rating > 0 ? (
-            <div className="flex items-center gap-1.5">
-              <Stars rating={product.avg_rating} />
-              <span className="text-xs text-gray-400">({product.review_count ?? 0})</span>
-            </div>
-          ) : <span />}
-          {(product.total_orders > 0) && (
-            <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-              <i className="fas fa-shopping-bag text-xs" />
-              {product.total_orders} sold
-            </span>
-          )}
-        </div>
+        {/* Star rating */}
+        {product.avg_rating > 0 && (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Stars rating={product.avg_rating} />
+            <span className="text-xs text-gray-400">({product.review_count ?? 0})</span>
+          </div>
+        )}
 
         {/* Price */}
         <div className="flex items-baseline gap-2 mt-auto pt-1.5">

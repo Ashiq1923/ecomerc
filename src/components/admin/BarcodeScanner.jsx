@@ -2,63 +2,86 @@ import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 
 export default function BarcodeScanner({ onScan, onClose }) {
-  const videoRef  = useRef(null)
-  const readerRef = useRef(null)
+  const videoRef    = useRef(null)
+  const streamRef   = useRef(null)   // raw MediaStream
+  const controlsRef = useRef(null)   // ZXing controls
   const [error,   setError]   = useState(null)
   const [devices, setDevices] = useState([])
-  const [selDev,  setSelDev]  = useState(null)
+  const [selDev,  setSelDev]  = useState(undefined) // undefined = enumerating
   const [scanned, setScanned] = useState(null)
 
+  // Step 1 — enumerate cameras once on mount
   useEffect(() => {
-    const reader = new BrowserMultiFormatReader()
-    readerRef.current = reader
+    navigator.mediaDevices?.enumerateDevices()
+      .then(all => {
+        const cams = all.filter(d => d.kind === 'videoinput')
+        setDevices(cams)
+        if (!cams.length) { setError('No camera found on this device'); return }
+        const back = cams.find(d => /back|rear|environment/i.test(d.label))
+        setSelDev((back || cams[0]).deviceId)
+      })
+      .catch(() => setError('Camera not accessible'))
 
-    // List available cameras
-    BrowserMultiFormatReader.listVideoInputDevices().then(devs => {
-      setDevices(devs)
-      // Prefer back camera on mobile
-      const back = devs.find(d => /back|rear|environment/i.test(d.label))
-      setSelDev((back || devs[0])?.deviceId || null)
-    }).catch(() => setError('Camera not accessible'))
-
-    return () => stopReader()
+    return () => cleanup()
   }, [])
 
+  // Step 2 — start camera whenever selected device changes
   useEffect(() => {
-    if (selDev === null || !videoRef.current) return
-    stopReader()
-    startReader(selDev)
+    if (selDev === undefined) return
+    startCamera(selDev)
+    return () => cleanup()
   }, [selDev])
 
-  function startReader(deviceId) {
-    const reader = readerRef.current
-    if (!reader) return
+  async function startCamera(deviceId) {
+    cleanup()
+    setError(null)
+    try {
+      // 1. Get stream with getUserMedia — most reliable way
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: deviceId
+          ? { deviceId: { exact: deviceId } }
+          : { facingMode: 'environment' },
+      })
+      streamRef.current = stream
 
-    reader.decodeFromVideoDevice(deviceId || undefined, videoRef.current, (result, err) => {
-      if (result) {
+      // 2. Attach stream to video element and play explicitly
+      const video = videoRef.current
+      if (!video) { cleanup(); return }
+      video.srcObject = stream
+      await video.play()
+
+      // 3. Hand the already-playing stream to ZXing for barcode decoding
+      const reader   = new BrowserMultiFormatReader()
+      const controls = await reader.decodeFromStream(stream, video, (result) => {
+        if (!result) return
         const text = result.getText()
-        // Only act on ORD-XXXXXX format
         if (/^ORD-[A-Z0-9]{6}$/i.test(text)) {
           setScanned(text.toUpperCase())
-          stopReader()
+          cleanup()
           onScan(text.toUpperCase())
         }
-      }
-      if (err && !(err instanceof NotFoundException)) {
-        // ignore NotFoundException — it fires constantly when no barcode in frame
-      }
-    }).catch(e => setError(e.message || 'Could not start camera'))
+      })
+      controlsRef.current = controls
+    } catch (e) {
+      setError(e.message || 'Could not access camera')
+    }
   }
 
-  function stopReader() {
-    try {
-      BrowserMultiFormatReader.releaseAllStreams()
-    } catch {}
+  function cleanup() {
+    if (controlsRef.current) {
+      try { controlsRef.current.stop() } catch {}
+      controlsRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    if (videoRef.current) videoRef.current.srcObject = null
   }
 
   function rescan() {
     setScanned(null)
-    startReader(selDev)
+    startCamera(selDev)
   }
 
   return (
@@ -76,7 +99,7 @@ export default function BarcodeScanner({ onScan, onClose }) {
           </button>
         </div>
 
-        {/* Camera selector — show only if multiple cameras */}
+        {/* Camera selector — only if multiple cameras */}
         {devices.length > 1 && (
           <div className="px-4 pt-3">
             <select
@@ -92,15 +115,20 @@ export default function BarcodeScanner({ onScan, onClose }) {
         )}
 
         {/* Video feed */}
-        <div className="relative mx-4 my-3 rounded-xl overflow-hidden bg-black aspect-video">
-          <video ref={videoRef} className="w-full h-full object-cover" muted autoPlay playsInline />
+        <div className="relative mx-4 my-3 rounded-xl overflow-hidden bg-black" style={{ aspectRatio: '16/9' }}>
+          <video
+            ref={videoRef}
+            className="w-full h-full"
+            style={{ objectFit: 'cover', display: 'block' }}
+            muted
+            playsInline
+          />
 
-          {/* Scanning guide overlay */}
+          {/* Scanning guide */}
           {!scanned && !error && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="border-2 border-emerald-400 rounded-lg w-3/4 h-16 relative">
                 <div className="absolute inset-x-0 top-1/2 h-0.5 bg-emerald-400 opacity-60 animate-pulse" />
-                {/* Corner marks */}
                 {['top-0 left-0','top-0 right-0','bottom-0 left-0','bottom-0 right-0'].map((pos, i) => (
                   <div key={i} className={`absolute ${pos} w-3 h-3 border-emerald-400 border-2 ${
                     i < 2 ? 'border-b-0' : 'border-t-0'
@@ -129,7 +157,7 @@ export default function BarcodeScanner({ onScan, onClose }) {
           )}
         </div>
 
-        {/* Status / action */}
+        {/* Footer */}
         <div className="px-4 pb-4 text-center">
           {!scanned && !error && (
             <p className="text-xs text-gray-400 flex items-center justify-center gap-1.5">
