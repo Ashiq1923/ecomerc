@@ -3,7 +3,7 @@ import { supabase, formatPrice } from '../../lib/supabase'
 import { addToast } from '../ToastContainer'
 
 const EMPTY = { name: '', description: '', price: '', sale_price: '', stock: '', category_id: '', image_url: '', is_active: true }
-const BUCKET = 'products'
+const BUCKET = 'images'
 
 export default function ProductManager() {
   const [products,   setProducts]   = useState([])

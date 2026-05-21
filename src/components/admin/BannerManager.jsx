@@ -128,7 +128,7 @@ export default function BannerManager() {
               <Inp label="Button Text"  value={form.button_text} onChange={setF('button_text')} />
               <Inp label="Link URL"     value={form.link_url}    onChange={setF('link_url')} placeholder="https://..." />
               <ImageUpload
-                bucket="products"
+                bucket="images"
                 label="Banner Image"
                 value={form.image_url}
                 onChange={url => setForm(f => ({ ...f, image_url: url }))}
