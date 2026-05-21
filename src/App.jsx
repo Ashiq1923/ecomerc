@@ -5,8 +5,9 @@ import { ToastProvider } from './context/ToastContext'
 import Navbar        from './components/Navbar'
 import Footer        from './components/Footer'
 import WhatsAppButton from './components/WhatsAppButton'
-import CartSidebar   from './components/CartSidebar'
-import AuthModal     from './components/AuthModal'
+import CartSidebar    from './components/CartSidebar'
+import CartBottomBar  from './components/CartBottomBar'
+import AuthModal      from './components/AuthModal'
 import ToastContainer from './components/ToastContainer'
 import HomePage      from './pages/HomePage'
 import ProductPage   from './pages/ProductPage'
@@ -33,6 +34,7 @@ export default function App() {
             <Footer />
             <WhatsAppButton />
             <CartSidebar />
+            <CartBottomBar />
             <AuthModal />
             <ToastContainer />
           </div>
