@@ -11,17 +11,15 @@ export function AuthProvider({ children }) {
   const [authModal,    setAuthModal]    = useState(false)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setLoading(false)
-      }
-    })
+    // onAuthStateChange fires immediately with INITIAL_SESSION in Supabase v2,
+    // so getSession() is NOT needed — using both causes fetchProfile to run twice,
+    // which makes loading flash and hides admin features momentarily.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Token refresh doesn't change the user or profile — skip re-fetch
+      if (event === 'TOKEN_REFRESHED') return
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setUser(session?.user ?? null)
+
       if (session?.user) {
         await fetchProfile(session.user.id)
       } else {
@@ -43,7 +41,7 @@ export function AuthProvider({ children }) {
       const { data, error } = await Promise.race([
         supabase.from('profiles').select('*').eq('id', uid).single(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Profile fetch timed out — RLS policy conflict')), 10000)
+          setTimeout(() => reject(new Error('Profile fetch timed out — RLS policy conflict')), 6000)
         ),
       ])
 
