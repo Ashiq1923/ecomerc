@@ -48,9 +48,7 @@ export default function BarcodeScanner({ onScan, onClose }) {
       if (!video) { cleanup(); return }
       video.srcObject = stream
       await video.play()
-
-      // Start frame-by-frame decoding loop once video is actually playing
-      video.addEventListener('playing', startScanLoop, { once: true })
+      startScanLoop()
     } catch (e) {
       setError(e.message || 'Could not access camera')
     }
