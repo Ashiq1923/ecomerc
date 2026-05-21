@@ -92,7 +92,7 @@ export default function AdminPage() {
     )
   }
 
-  // Profile fetch failed (likely RLS policy conflict) — show fix instructions
+  // Profile fetch timed out — RLS recursion still present
   if (!loading && profileError) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -100,16 +100,18 @@ export default function AdminPage() {
           <div className="w-16 h-16 rounded-2xl bg-red-100 flex items-center justify-center mx-auto mb-4">
             <i className="fas fa-database text-red-500 text-2xl" />
           </div>
-          <h2 className="text-xl font-bold text-gray-800 mb-2">Database Policy Error</h2>
-          <p className="text-sm text-gray-500 mb-6">
-            Supabase RLS policy conflict is blocking profile access. Run this one SQL line to fix it permanently.
+          <h2 className="text-xl font-bold text-gray-800 mb-2">Profile Fetch Timeout</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Query 6 seconds mein complete nahi hui — iska matlab <strong>"Admin read all profiles"</strong> policy abhi bhi exist karti hai.
+          </p>
+          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 mb-6">
+            Supabase mein <strong>Authentication → Policies → profiles</strong> table mein jao aur confirm karo ke yeh policy delete ho gayi ya nahi.
           </p>
 
-          {/* SQL to copy */}
           <div className="bg-gray-900 rounded-xl p-4 text-left mb-6">
-            <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">SQL Editor mein paste karo:</p>
+            <p className="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Dobara run karo yeh SQL:</p>
             <code className="text-emerald-400 text-sm font-mono select-all">
-              drop policy if exists "Admin read all profiles" on profiles;
+              {`drop policy if exists "Admin read all profiles" on profiles;`}
             </code>
           </div>
 
@@ -128,7 +130,7 @@ export default function AdminPage() {
               className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-semibold text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 transition"
             >
               <i className="fas fa-redo text-xs" />
-              SQL run karne ke baad yahan click karo
+              SQL run karne ke baad Reload
             </button>
             <Link to="/" className="block text-xs text-gray-400 hover:text-gray-600 transition text-center pt-1">
               Wapas Store par jao

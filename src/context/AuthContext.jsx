@@ -2,20 +2,29 @@ import { createContext, useContext, useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext({})
+const CACHE_KEY = 'se_profile'
+
+function readCache()  {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY)) } catch { return null }
+}
+function writeCache(p) {
+  try {
+    if (p) localStorage.setItem(CACHE_KEY, JSON.stringify(p))
+    else    localStorage.removeItem(CACHE_KEY)
+  } catch {}
+}
 
 export function AuthProvider({ children }) {
+  const cached = readCache()
+
   const [user,         setUser]         = useState(null)
-  const [profile,      setProfile]      = useState(null)
-  const [loading,      setLoading]      = useState(true)
+  const [profile,      setProfile]      = useState(cached)          // instant from cache
+  const [loading,      setLoading]      = useState(!cached)         // skip loading if cached
   const [profileError, setProfileError] = useState(false)
   const [authModal,    setAuthModal]    = useState(false)
 
   useEffect(() => {
-    // onAuthStateChange fires immediately with INITIAL_SESSION in Supabase v2,
-    // so getSession() is NOT needed — using both causes fetchProfile to run twice,
-    // which makes loading flash and hides admin features momentarily.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Token refresh doesn't change the user or profile — skip re-fetch
       if (event === 'TOKEN_REFRESHED') return
 
       setUser(session?.user ?? null)
@@ -26,6 +35,7 @@ export function AuthProvider({ children }) {
         setProfile(null)
         setProfileError(false)
         setLoading(false)
+        writeCache(null)
       }
     })
 
@@ -33,32 +43,77 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function fetchProfile(uid) {
+    // If we already have a cached profile for this user, show immediately
+    // and fetch fresh data silently in background (no loading flash)
+    const alreadyCached = readCache()
+    if (alreadyCached?.id === uid) {
+      setProfile(alreadyCached)
+      setLoading(false)
+      // Still refresh in background — don't block UI
+      refreshProfileSilent(uid)
+      return
+    }
+
+    // No cache — show loading and fetch
     setLoading(true)
     setProfileError(false)
-    try {
-      // Race between the query and a 10-second timeout
-      // If RLS infinite recursion hangs the query, timeout fires and we show an error
-      const { data, error } = await Promise.race([
-        supabase.from('profiles').select('*').eq('id', uid).single(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Profile fetch timed out — RLS policy conflict')), 6000)
-        ),
-      ])
+    await doFetch(uid)
+    setLoading(false)
+  }
 
-      if (error) {
-        console.error('Profile fetch error:', error.message)
-        setProfile(null)
-        setProfileError(true)
-      } else {
-        setProfile(data)
-        setProfileError(false)
+  async function refreshProfileSilent(uid) {
+    const result = await supabase.from('profiles').select('*').eq('id', uid).single()
+    if (!result.error && result.data) {
+      setProfile(result.data)
+      writeCache(result.data)
+    }
+  }
+
+  async function doFetch(uid) {
+    setProfileError(false)
+    try {
+      let result
+      try {
+        result = await Promise.race([
+          supabase.from('profiles').select('*').eq('id', uid).single(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('__timeout__')), 6000)
+          ),
+        ])
+      } catch (e) {
+        if (e?.message === '__timeout__') {
+          setProfile(null)
+          setProfileError(true)
+          return
+        }
+        throw e
       }
-    } catch (e) {
-      console.error('Profile fetch failed:', e?.message)
+
+      const { data, error } = result
+
+      if (!error) {
+        setProfile(data)
+        writeCache(data)
+        return
+      }
+
+      // PGRST116 = no profile row — create one automatically
+      if (error.code === 'PGRST116') {
+        const { data: created } = await supabase
+          .from('profiles')
+          .upsert({ id: uid, is_admin: false }, { onConflict: 'id' })
+          .select()
+          .single()
+        setProfile(created || null)
+        writeCache(created || null)
+        return
+      }
+
+      console.error('Profile fetch error:', error.code, error.message)
       setProfile(null)
-      setProfileError(true)
-    } finally {
-      setLoading(false)
+    } catch (e) {
+      console.error('Profile fetch exception:', e?.message)
+      setProfile(null)
     }
   }
 
@@ -78,6 +133,7 @@ export function AuthProvider({ children }) {
 
   async function logout() {
     try { await supabase.auth.signOut() } catch (e) {}
+    writeCache(null)
     setUser(null)
     setProfile(null)
     setProfileError(false)
@@ -94,6 +150,7 @@ export function AuthProvider({ children }) {
       .single()
     if (error) throw error
     setProfile(data)
+    writeCache(data)
     return data
   }
 
