@@ -22,16 +22,23 @@ export default function ReviewSection({ productId, onRatingChange }) {
     setLoading(true)
     const { data } = await supabase
       .from('reviews')
-      .select('*, profiles(full_name)')
+      .select('*')
       .eq('product_id', productId)
       .eq('is_approved', true)
       .order('created_at', { ascending: false })
 
-    setReviews(data || [])
-
-    if (user && data) {
-      const mine = data.find(r => r.user_id === user.id)
-      setUserReview(mine || null)
+    if (data?.length) {
+      const userIds = [...new Set(data.map(r => r.user_id).filter(Boolean))]
+      const { data: profileRows } = await supabase
+        .from('profiles').select('id, full_name').in('id', userIds)
+      const nameMap = {}
+      profileRows?.forEach(p => { nameMap[p.id] = p.full_name })
+      const enriched = data.map(r => ({ ...r, reviewer_name: nameMap[r.user_id] || null }))
+      setReviews(enriched)
+      if (user) setUserReview(enriched.find(r => r.user_id === user.id) || null)
+    } else {
+      setReviews([])
+      setUserReview(null)
     }
     setLoading(false)
   }
@@ -182,10 +189,10 @@ export default function ReviewSection({ productId, onRatingChange }) {
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm">
-                    {(r.profiles?.full_name || 'U')[0].toUpperCase()}
+                    {(r.reviewer_name || 'U')[0].toUpperCase()}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-gray-700">{r.profiles?.full_name || 'Anonymous'}</p>
+                    <p className="text-sm font-semibold text-gray-700">{r.reviewer_name || 'Anonymous'}</p>
                     <Stars rating={r.rating} />
                   </div>
                 </div>

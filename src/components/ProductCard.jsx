@@ -79,13 +79,21 @@ export default function ProductCard({ product }) {
           {product.name}
         </h3>
 
-        {/* Star rating */}
-        {product.avg_rating > 0 && (
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <Stars rating={product.avg_rating} />
-            <span className="text-xs text-gray-400">({product.review_count ?? 0})</span>
-          </div>
-        )}
+        {/* Star rating + order count */}
+        <div className="flex items-center justify-between mt-0.5">
+          {product.avg_rating > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <Stars rating={product.avg_rating} />
+              <span className="text-xs text-gray-400">({product.review_count ?? 0})</span>
+            </div>
+          ) : <span />}
+          {(product.total_orders > 0) && (
+            <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+              <i className="fas fa-shopping-bag text-xs" />
+              {product.total_orders} sold
+            </span>
+          )}
+        </div>
 
         {/* Price */}
         <div className="flex items-baseline gap-2 mt-auto pt-1.5">

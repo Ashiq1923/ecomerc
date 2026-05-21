@@ -4,6 +4,9 @@ import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { supabase, formatPrice, effectivePrice, WHATSAPP_NUMBER, STORE_NAME } from '../lib/supabase'
 import { addToast } from '../components/ToastContainer'
+import LocationPicker from '../components/LocationPicker'
+
+function orderNo(id) { return `ORD-${id.slice(0, 6).toUpperCase()}` }
 
 export default function CartPage() {
   const { items, removeFromCart, updateQty, clearCart, totalItems, totalPrice } = useCart()
@@ -11,21 +14,28 @@ export default function CartPage() {
   const navigate = useNavigate()
 
   const [form, setForm] = useState({
-    name:    '',
-    phone:   '',
-    address: '',
-    notes:   '',
+    name:     '',
+    phone:    '',
+    house:    '',
+    street:   '',
+    area:     '',
+    town:     '',
+    city:     '',
+    notes:    '',
+    location: '',
   })
   const [loading, setLoading] = useState(false)
 
   // Sync delivery details from saved profile whenever profile loads/changes
   useEffect(() => {
     if (profile) {
+      const addr = splitAddress(profile.address)
       setForm(f => ({
         ...f,
-        name:    profile.full_name || f.name,
-        phone:   profile.phone     || f.phone,
-        address: profile.address   || f.address,
+        name:     profile.full_name || f.name,
+        phone:    profile.phone     || f.phone,
+        location: profile.location  || f.location,
+        ...addr,
       }))
     }
   }, [profile])
@@ -38,15 +48,25 @@ export default function CartPage() {
     e.preventDefault()
     if (!items.length) { addToast('Your cart is empty!', 'error'); return }
     if (!form.name || !form.phone) { addToast('Please fill name and phone', 'error'); return }
+    if (!form.city) { addToast('Please enter your city', 'error'); return }
     setLoading(true)
 
-    // Build WhatsApp message
-    const lines = [
+    const fullAddress = buildAddress(form)
+
+    // Build WhatsApp message — order number added after insert
+    const buildLines = (ordNo) => [
       `🛍️ *New Order – ${STORE_NAME}*`,
+      ordNo ? `🔢 *Order #:* ${ordNo}` : '',
       ``,
       `👤 *Customer:* ${form.name}`,
       `📞 *Phone:* ${form.phone}`,
-      `📍 *Address:* ${form.address || 'N/A'}`,
+      `📍 *Address:*`,
+      form.house  ? `   House/Flat: ${form.house}`  : '',
+      form.street ? `   Street: ${form.street}`      : '',
+      form.area   ? `   Area: ${form.area}`           : '',
+      form.town   ? `   Town: ${form.town}`           : '',
+      form.city   ? `   City: ${form.city}`           : '',
+      form.location ? `🗺️ *Location:* https://maps.google.com/?q=${form.location}` : '',
       form.notes ? `📝 *Notes:* ${form.notes}` : '',
       ``,
       `*Order Items:*`,
@@ -57,9 +77,10 @@ export default function CartPage() {
       `💰 *Total: ${formatPrice(totalPrice)}*`,
       ``,
       `Please confirm my order. Thank you!`,
-    ].filter(l => l !== null).join('\n')
+    ].filter(Boolean).join('\n')
 
     // Save order to Supabase
+    let ordNo = ''
     try {
       const orderItems = items.map(({ product, quantity }) => ({
         product_id: product.id,
@@ -68,22 +89,31 @@ export default function CartPage() {
         name:       product.name,
       }))
 
-      await supabase.from('orders').insert({
-        user_id:         user?.id || null,
-        customer_name:   form.name,
-        customer_phone:  form.phone,
-        customer_address: form.address,
-        notes:           form.notes,
-        total_amount:    totalPrice,
-        status:          'pending',
-        items:           orderItems,
-      })
+      const { data: inserted } = await supabase.from('orders').insert({
+        user_id:          user?.id || null,
+        customer_name:    form.name,
+        customer_phone:   form.phone,
+        customer_address: fullAddress,
+        notes:            form.notes,
+        total_amount:     totalPrice,
+        status:           'pending',
+        items:            orderItems,
+        location:         form.location || null,
+      }).select('id').single()
+
+      if (inserted?.id) ordNo = orderNo(inserted.id)
+
+      // Increment order count on each ordered product
+      const productIds = orderItems.map(i => i.product_id)
+      await supabase.rpc('increment_product_orders', { product_ids: productIds })
+
       // Save delivery details back to profile for future orders
       if (user) {
         await supabase.from('profiles').update({
           full_name: form.name.trim(),
           phone:     form.phone.trim(),
-          address:   form.address.trim(),
+          address:   fullAddress,
+          location:  form.location || null,
         }).eq('id', user.id)
       }
     } catch (err) {
@@ -92,9 +122,9 @@ export default function CartPage() {
 
     setLoading(false)
     clearCart()
-    // Open WhatsApp
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(lines)}`, '_blank')
-    addToast('Order sent via WhatsApp! 🎉', 'success')
+    // Open WhatsApp with order number included
+    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(buildLines(ordNo))}`, '_blank')
+    addToast(ordNo ? `Order ${ordNo} sent via WhatsApp! 🎉` : 'Order sent via WhatsApp! 🎉', 'success')
     navigate('/')
   }
 
@@ -184,9 +214,33 @@ export default function CartPage() {
               )}
             </div>
             <div className="p-5 space-y-3">
-              <Field label="Full Name *" name="name" type="text" value={form.name} onChange={change} placeholder="Ahmad Ali" />
-              <Field label="Phone *" name="phone" type="tel" value={form.phone} onChange={change} placeholder="03XX-XXXXXXX" />
-              <Field label="Address" name="address" type="text" value={form.address} onChange={change} placeholder="Street, City" />
+              <Field label="Full Name *" name="name"  type="text" value={form.name}  onChange={change} />
+              <Field label="Phone *"     name="phone" type="tel"  value={form.phone} onChange={change} />
+
+              {/* Address section */}
+              <div className="border border-gray-100 rounded-xl p-3 space-y-2.5 bg-gray-50">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                  <i className="fas fa-map-marker-alt text-emerald-500" /> Delivery Address
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="House / Flat #" name="house"  type="text" value={form.house}  onChange={change} />
+                  <Field label="Street #"        name="street" type="text" value={form.street} onChange={change} />
+                </div>
+                <Field label="Area / Colony"   name="area"   type="text" value={form.area}   onChange={change} />
+                <Field label="Town"            name="town"   type="text" value={form.town}   onChange={change} />
+                <Field label="City *"          name="city"   type="text" value={form.city}   onChange={change} />
+                {/* Optional GPS location */}
+                <div className="pt-1">
+                  <p className="text-xs font-semibold text-gray-500 mb-1.5 flex items-center gap-1">
+                    <i className="fas fa-location-dot text-blue-400" />
+                    Live Location <span className="text-gray-400 font-normal">(optional)</span>
+                  </p>
+                  <LocationPicker
+                    value={form.location}
+                    onChange={loc => setForm(f => ({ ...f, location: loc }))}
+                  />
+                </div>
+              </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-gray-600">Order Notes</label>
                 <textarea
@@ -239,8 +293,25 @@ function Field({ label, name, type, value, onChange, placeholder }) {
       <label className="text-xs font-semibold text-gray-600">{label}</label>
       <input
         name={name} type={type} value={value} onChange={onChange} placeholder={placeholder}
-        className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition"
+        className="px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition bg-white"
       />
     </div>
   )
+}
+
+function buildAddress(form) {
+  return [form.house, form.street, form.area, form.town, form.city]
+    .map(v => v?.trim()).filter(Boolean).join(', ')
+}
+
+function splitAddress(addr) {
+  if (!addr) return { house: '', street: '', area: '', town: '', city: '' }
+  const parts = addr.split(', ')
+  return {
+    house:  parts[0] || '',
+    street: parts[1] || '',
+    area:   parts[2] || '',
+    town:   parts[3] || '',
+    city:   parts[4] || '',
+  }
 }

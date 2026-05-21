@@ -31,7 +31,6 @@ export function CartProvider({ children }) {
       }
       return [...prev, { product, quantity: qty }]
     })
-    setIsOpen(true)
   }
 
   function removeFromCart(productId) {

@@ -132,15 +132,23 @@ export default function ProductPage() {
           )}
           <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 leading-tight">{product.name}</h1>
 
-          {/* Rating */}
-          {product.avg_rating > 0 && (
-            <div className="flex items-center gap-2">
-              <Stars rating={product.avg_rating} size="base" />
-              <span className="text-sm text-gray-500">
-                {Number(product.avg_rating).toFixed(1)} ({product.review_count || 0} reviews)
+          {/* Rating + Orders */}
+          <div className="flex items-center gap-4 flex-wrap">
+            {product.avg_rating > 0 && (
+              <div className="flex items-center gap-2">
+                <Stars rating={product.avg_rating} size="base" />
+                <span className="text-sm text-gray-500">
+                  {Number(product.avg_rating).toFixed(1)} ({product.review_count || 0} reviews)
+                </span>
+              </div>
+            )}
+            {product.total_orders > 0 && (
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">
+                <i className="fas fa-shopping-bag text-xs" />
+                {product.total_orders} people ordered this
               </span>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Price */}
           <div className="flex items-baseline gap-3">

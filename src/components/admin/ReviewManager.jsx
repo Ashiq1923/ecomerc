@@ -12,11 +12,26 @@ export default function ReviewManager() {
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase
+
+    const { data, error } = await supabase
       .from('reviews')
-      .select('*, products(name), profiles(full_name)')
+      .select('*, products(name)')
       .order('created_at', { ascending: false })
-    setReviews(data || [])
+
+    if (error) { console.error('ReviewManager load error:', error.message); setLoading(false); return }
+    if (!data?.length) { setReviews([]); setLoading(false); return }
+
+    // Fetch reviewer names separately (reviews → auth.users, not profiles FK)
+    const userIds = [...new Set(data.map(r => r.user_id).filter(Boolean))]
+    const { data: profileRows } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', userIds)
+
+    const nameMap = {}
+    profileRows?.forEach(p => { nameMap[p.id] = p.full_name })
+
+    setReviews(data.map(r => ({ ...r, reviewer_name: nameMap[r.user_id] || null })))
     setLoading(false)
   }
 
@@ -71,10 +86,10 @@ export default function ReviewManager() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 flex-wrap mb-1">
                     <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
-                      {(r.profiles?.full_name || 'U')[0].toUpperCase()}
+                      {(r.reviewer_name || 'U')[0].toUpperCase()}
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-gray-800">{r.profiles?.full_name || 'Anonymous'}</p>
+                      <p className="text-sm font-semibold text-gray-800">{r.reviewer_name || 'Anonymous'}</p>
                       <p className="text-xs text-gray-400">on <span className="text-primary font-medium">{r.products?.name}</span></p>
                     </div>
                     <Stars rating={r.rating} />

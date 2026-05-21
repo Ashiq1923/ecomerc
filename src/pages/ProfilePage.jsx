@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { supabase, formatPrice } from '../lib/supabase'
+import { supabase, formatPrice, WHATSAPP_NUMBER, STORE_NAME } from '../lib/supabase'
+import LocationPicker from '../components/LocationPicker'
+import PrintSlip, { orderNo } from '../components/PrintSlip'
 
 const TABS = [
   { key: 'profile',  label: 'My Profile',       icon: 'fa-user' },
@@ -78,9 +80,11 @@ export default function ProfilePage() {
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          {tab === 'profile'  && <ProfileTab user={user} profile={profile} updateProfile={updateProfile} />}
-          {tab === 'password' && <PasswordTab />}
-          {tab === 'orders'   && <OrdersTab user={user} />}
+          <div key={tab} className="tab-content">
+            {tab === 'profile'  && <ProfileTab user={user} profile={profile} updateProfile={updateProfile} />}
+            {tab === 'password' && <PasswordTab />}
+            {tab === 'orders'   && <OrdersTab user={user} />}
+          </div>
         </div>
       </div>
     </div>
@@ -88,21 +92,35 @@ export default function ProfilePage() {
 }
 
 /* ── Profile / Delivery Details Tab ─────────────────────────────── */
+function splitAddress(addr) {
+  if (!addr) return { house: '', street: '', area: '', town: '', city: '' }
+  const parts = addr.split(', ')
+  return { house: parts[0]||'', street: parts[1]||'', area: parts[2]||'', town: parts[3]||'', city: parts[4]||'' }
+}
+
+function buildAddress(f) {
+  return [f.house, f.street, f.area, f.town, f.city].map(v => v?.trim()).filter(Boolean).join(', ')
+}
+
 function ProfileTab({ user, profile, updateProfile }) {
+  const addrInit = splitAddress(profile?.address)
   const [form, setForm] = useState({
     full_name: profile?.full_name || '',
     phone:     profile?.phone     || '',
-    address:   profile?.address   || '',
+    location:  profile?.location  || '',
+    ...addrInit,
   })
   const [saving, setSaving] = useState(false)
   const [saved,  setSaved]  = useState(false)
   const [error,  setError]  = useState(null)
 
   useEffect(() => {
+    const addr = splitAddress(profile?.address)
     setForm({
       full_name: profile?.full_name || '',
       phone:     profile?.phone     || '',
-      address:   profile?.address   || '',
+      location:  profile?.location  || '',
+      ...addr,
     })
   }, [profile])
 
@@ -120,7 +138,8 @@ function ProfileTab({ user, profile, updateProfile }) {
       await updateProfile({
         full_name: form.full_name.trim(),
         phone:     form.phone.trim(),
-        address:   form.address.trim(),
+        address:   buildAddress(form),
+        location:  form.location || null,
       })
       setSaved(true)
     } catch (err) {
@@ -142,9 +161,34 @@ function ProfileTab({ user, profile, updateProfile }) {
       </div>
 
       <form onSubmit={handleSave} className="p-5 space-y-4">
-        <ProfileField label="Full Name" name="full_name" type="text"     value={form.full_name} onChange={change} placeholder="Ahmad Ali" />
-        <ProfileField label="Phone"     name="phone"     type="tel"      value={form.phone}     onChange={change} placeholder="03XX-XXXXXXX" />
-        <ProfileField label="Delivery Address" name="address" type="text" value={form.address}  onChange={change} placeholder="House #, Street, City" />
+        <ProfileField label="Full Name" name="full_name" type="text" value={form.full_name} onChange={change} />
+        <ProfileField label="Phone"    name="phone"     type="tel"  value={form.phone}     onChange={change} />
+
+        {/* Address fields */}
+        <div className="border border-gray-100 rounded-xl p-3.5 space-y-3 bg-gray-50">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+            <i className="fas fa-map-marker-alt text-emerald-500" /> Delivery Address
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <ProfileField label="House / Flat #" name="house"  type="text" value={form.house||''}  onChange={change} />
+            <ProfileField label="Street #"        name="street" type="text" value={form.street||''} onChange={change} />
+          </div>
+          <ProfileField label="Area / Colony" name="area"  type="text" value={form.area||''}  onChange={change} />
+          <ProfileField label="Town"          name="town"  type="text" value={form.town||''}  onChange={change} />
+          <ProfileField label="City"          name="city"  type="text" value={form.city||''}  onChange={change} />
+        </div>
+
+        {/* Live location */}
+        <div className="border border-gray-100 rounded-xl p-3.5 space-y-2 bg-gray-50">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+            <i className="fas fa-location-dot text-blue-400" /> Live Location
+            <span className="text-gray-400 font-normal normal-case ml-1">(optional — for delivery)</span>
+          </p>
+          <LocationPicker
+            value={form.location}
+            onChange={loc => { setForm(f => ({ ...f, location: loc })); setSaved(false) }}
+          />
+        </div>
 
         {error && (
           <div className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm bg-red-50 text-red-600 border border-red-200">
@@ -247,9 +291,11 @@ function PasswordTab() {
 
 /* ── My Orders Tab ───────────────────────────────────────────────── */
 function OrdersTab({ user }) {
-  const [orders,  setOrders]  = useState([])
-  const [loading, setLoading] = useState(true)
-  const [expanded, setExpanded] = useState(null)
+  const [orders,    setOrders]    = useState([])
+  const [loading,   setLoading]   = useState(true)
+  const [expanded,  setExpanded]  = useState(null)
+  const [cancelling, setCancelling] = useState(null)
+  const [printing,  setPrinting]  = useState(null)
 
   useEffect(() => {
     supabase
@@ -262,6 +308,49 @@ function OrdersTab({ user }) {
         setLoading(false)
       })
   }, [user.id])
+
+  async function cancelOrder(orderId) {
+    if (!confirm('Cancel this order? This cannot be undone.')) return
+    setCancelling(orderId)
+
+    const order = orders.find(o => o.id === orderId)
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: 'cancelled' })
+      .eq('id', orderId)
+      .eq('status', 'pending')
+
+    if (!error) {
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'cancelled' } : o))
+
+      // Send WhatsApp cancellation message
+      if (order) {
+        const items = Array.isArray(order.items) ? order.items : []
+        const date  = new Date(order.created_at).toLocaleDateString('en-PK', {
+          day: 'numeric', month: 'short', year: 'numeric'
+        })
+        const msg = [
+          `❌ *Order Cancelled – ${STORE_NAME}*`,
+          `🔢 *Order #:* ${orderNo(order.id)}`,
+          ``,
+          `👤 *Customer:* ${order.customer_name}`,
+          `📞 *Phone:* ${order.customer_phone}`,
+          order.customer_address ? `📍 *Address:* ${order.customer_address}` : '',
+          `📅 *Order Date:* ${date}`,
+          ``,
+          `*Cancelled Items:*`,
+          ...items.map(i => `• ${i.name} × ${i.quantity} = ${formatPrice(i.price * i.quantity)}`),
+          ``,
+          `💰 *Order Total: ${formatPrice(order.total_amount)}*`,
+          ``,
+          `I want to cancel this order. Please confirm cancellation. Thank you!`,
+        ].filter(Boolean).join('\n')
+
+        window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`, '_blank')
+      }
+    }
+    setCancelling(null)
+  }
 
   if (loading) {
     return (
@@ -302,48 +391,75 @@ function OrdersTab({ user }) {
         </div>
 
         <div className="divide-y divide-gray-50">
-          {orders.map(order => {
+          {orders.map((order, idx) => {
             const style   = STATUS_STYLES[order.status] || STATUS_STYLES.pending
             const isOpen  = expanded === order.id
             const items   = Array.isArray(order.items) ? order.items : []
             const date    = new Date(order.created_at).toLocaleDateString('en-PK', {
               day: 'numeric', month: 'short', year: 'numeric'
             })
+            const isPending = order.status === 'pending'
 
             return (
-              <div key={order.id}>
+              <div key={order.id} className="order-item animate-fade-in-up" style={{ animationDelay: `${idx * 60}ms` }}>
                 {/* Order row */}
-                <button
-                  onClick={() => setExpanded(isOpen ? null : order.id)}
-                  className="w-full flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors duration-150 text-left"
-                >
-                  {/* Status icon */}
-                  <div className={`w-10 h-10 rounded-xl ${style.bg} flex items-center justify-center flex-shrink-0`}>
-                    <i className={`fas ${style.icon} ${style.text} text-sm`} />
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-gray-800">
-                        {items.length} item{items.length !== 1 ? 's' : ''}
-                      </span>
-                      <span className={`text-xs capitalize px-2.5 py-0.5 rounded-full font-semibold ${style.bg} ${style.text}`}>
-                        {order.status}
-                      </span>
+                <div className="flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors duration-150">
+                  {/* Clickable area */}
+                  <button
+                    onClick={() => setExpanded(isOpen ? null : order.id)}
+                    className="flex items-center gap-4 flex-1 text-left min-w-0"
+                  >
+                    {/* Status icon */}
+                    <div className={`w-10 h-10 rounded-xl ${style.bg} flex items-center justify-center flex-shrink-0 transition-all duration-300`}>
+                      <i className={`fas ${style.icon} ${style.text} text-sm`} />
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">{date}</p>
-                  </div>
 
-                  {/* Total */}
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-bold text-gray-800">{formatPrice(order.total_amount)}</p>
-                    <i className={`fas fa-chevron-down text-xs text-gray-400 mt-1 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-gray-500 font-mono">#{orderNo(order.id)}</span>
+                        <span className={`text-xs capitalize px-2.5 py-0.5 rounded-full font-semibold transition-all duration-300 ${style.bg} ${style.text}`}>
+                          {order.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5 font-medium">{items.length} item{items.length !== 1 ? 's' : ''} · {date}</p>
+                    </div>
+
+                    {/* Total */}
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-bold text-gray-800">{formatPrice(order.total_amount)}</p>
+                      <i className={`fas fa-chevron-down text-xs text-gray-400 mt-1 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
+                    </div>
+                  </button>
+
+                  {/* Action buttons */}
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    {/* Print slip */}
+                    <button
+                      onClick={() => setPrinting(order)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200 transition-all duration-200"
+                    >
+                      <i className="fas fa-print text-xs" />
+                    </button>
+
+                    {/* Cancel — only for pending orders */}
+                    {isPending && (
+                      <button
+                        onClick={() => cancelOrder(order.id)}
+                        disabled={cancelling === order.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-600 border border-red-100 transition-all duration-200 disabled:opacity-50 cancel-btn"
+                      >
+                        {cancelling === order.id
+                          ? <><i className="fas fa-spinner fa-spin" /> Cancelling</>
+                          : <><i className="fas fa-times" /> Cancel</>
+                        }
+                      </button>
+                    )}
                   </div>
-                </button>
+                </div>
 
                 {/* Expanded order details */}
-                {isOpen && (
+                <div className={`order-expand ${isOpen ? 'order-expand-open' : ''}`}>
                   <div className="px-4 pb-4 bg-gray-50 border-t border-gray-100">
                     <div className="pt-3 space-y-2">
                       {/* Delivery info */}
@@ -366,7 +482,7 @@ function OrdersTab({ user }) {
 
                       {/* Items list */}
                       {items.map((item, i) => (
-                        <div key={i} className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0">
+                        <div key={i} className="flex justify-between items-center py-2 border-b border-gray-100 last:border-0 animate-fade-in" style={{ animationDelay: `${i * 40}ms` }}>
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs flex items-center justify-center font-bold flex-shrink-0">
                               {item.quantity}
@@ -394,12 +510,15 @@ function OrdersTab({ user }) {
                       )}
                     </div>
                   </div>
-                )}
+                </div>
               </div>
             )
           })}
         </div>
       </div>
+
+      {/* Print slip modal */}
+      {printing && <PrintSlip order={printing} onClose={() => setPrinting(null)} />}
     </div>
   )
 }

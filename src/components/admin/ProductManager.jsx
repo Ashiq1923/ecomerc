@@ -156,7 +156,7 @@ export default function ProductManager() {
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowForm(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-in">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto modal-enter">
             <div className="flex items-center justify-between p-5 border-b">
               <h3 className="font-bold text-gray-800">{editing ? 'Edit Product' : 'New Product'}</h3>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-gray-100 rounded-full"><i className="fas fa-times" /></button>
